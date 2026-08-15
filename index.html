@@ -1,0 +1,159 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Voice-Enabled RAG | HH Goa 2026</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col items-center justify-center p-6 font-sans">
+  <div class="max-w-2xl w-full bg-slate-900 border border-slate-800 rounded-2xl p-8 shadow-2xl space-y-6">
+    <div class="flex items-center justify-between border-b border-slate-800 pb-4">
+      <div>
+        <h1 class="text-2xl font-bold text-emerald-400">Voice-Enabled RAG Pipeline</h1>
+        <p class="text-xs text-slate-400">MSMARCO-XI &bull; Groq Llama 3.1 &bull; LanceDB Hybrid &bull; #RAGInGoa</p>
+      </div>
+      <span id="status-pill" class="px-3 py-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-xs font-semibold rounded-full">Ready</span>
+    </div>
+
+    <!-- Voice Control -->
+    <div class="flex flex-col items-center space-y-4">
+      <button id="record-btn" class="w-24 h-24 rounded-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold flex items-center justify-center shadow-lg transition-transform active:scale-95 text-lg">
+        🎤 Speak
+      </button>
+      <p id="instruction" class="text-sm text-slate-400">Click to record your question, click again to submit</p>
+    </div>
+
+    <!-- Text Input Option -->
+    <div class="space-y-2">
+      <label class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Or Test with Text Input</label>
+      <div class="flex gap-2">
+        <input id="text-input" type="text" placeholder="e.g., What causes high blood pressure?" class="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:border-emerald-500">
+        <button id="submit-text-btn" class="bg-slate-800 hover:bg-slate-700 px-4 py-2.5 rounded-lg text-sm font-semibold transition-colors">Send</button>
+      </div>
+    </div>
+
+    <!-- Output Box -->
+    <div class="bg-slate-950 border border-slate-800 rounded-xl p-5 space-y-4">
+      <div>
+        <span class="text-xs text-slate-500 font-semibold uppercase tracking-wider">Transcribed Query</span>
+        <p id="query-out" class="text-slate-200 mt-1 italic text-sm">No query submitted yet.</p>
+      </div>
+
+      <div>
+        <span class="text-xs text-slate-500 font-semibold uppercase tracking-wider">Grounded Answer</span>
+        <p id="answer-out" class="text-emerald-400 mt-1 font-medium text-base">-</p>
+      </div>
+
+      <div class="grid grid-cols-3 gap-3 pt-3 border-t border-slate-800/80 text-xs">
+        <div class="bg-slate-900/80 p-2.5 rounded-lg border border-slate-800">
+          <div class="text-slate-500">Total Latency</div>
+          <div id="latency-out" class="text-slate-200 font-bold text-sm mt-0.5">- ms</div>
+        </div>
+        <div class="bg-slate-900/80 p-2.5 rounded-lg border border-slate-800">
+          <div class="text-slate-500">Confidence</div>
+          <div id="conf-out" class="text-slate-200 font-bold text-sm mt-0.5">-</div>
+        </div>
+        <div class="bg-slate-900/80 p-2.5 rounded-lg border border-slate-800">
+          <div class="text-slate-500">Guardrail Status</div>
+          <div id="grounded-out" class="font-bold text-sm mt-0.5 text-slate-400">-</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let mediaRecorder;
+    let audioChunks = [];
+    let isRecording = false;
+
+    const recordBtn = document.getElementById('record-btn');
+    const instruction = document.getElementById('instruction');
+    const statusPill = document.getElementById('status-pill');
+
+    recordBtn.addEventListener('click', async () => {
+      if (!isRecording) {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          mediaRecorder = new MediaRecorder(stream);
+          audioChunks = [];
+
+          mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
+          mediaRecorder.onstop = sendVoiceData;
+
+          mediaRecorder.start();
+          isRecording = true;
+          recordBtn.classList.replace('bg-emerald-500', 'bg-rose-500');
+          recordBtn.classList.replace('hover:bg-emerald-400', 'hover:bg-rose-400');
+          recordBtn.innerText = '⏹ Stop';
+          instruction.innerText = 'Recording... click to process query';
+          statusPill.innerText = 'Listening';
+          statusPill.className = 'px-3 py-1 bg-rose-500/10 text-rose-400 border border-rose-500/20 text-xs font-semibold rounded-full';
+        } catch (err) {
+          alert('Microphone permission denied or not available.');
+        }
+      } else {
+        mediaRecorder.stop();
+        isRecording = false;
+        recordBtn.classList.replace('bg-rose-500', 'bg-emerald-500');
+        recordBtn.classList.replace('hover:bg-rose-400', 'hover:bg-emerald-400');
+        recordBtn.innerText = '🎤 Speak';
+        instruction.innerText = 'Processing RAG pipeline...';
+        statusPill.innerText = 'Inferring';
+        statusPill.className = 'px-3 py-1 bg-amber-500/10 text-amber-400 border border-amber-500/20 text-xs font-semibold rounded-full';
+      }
+    });
+
+    async function sendVoiceData() {
+      const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+      const formData = new FormData();
+      formData.append('audio_file', audioBlob, 'recording.wav');
+
+      const res = await fetch('/api/query-voice', { method: 'POST', body: formData });
+      const data = await res.json();
+      displayOutput(data);
+    }
+
+    document.getElementById('submit-text-btn').addEventListener('click', sendTextData);
+    document.getElementById('text-input').addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') sendTextData();
+    });
+
+    async function sendTextData() {
+      const input = document.getElementById('text-input');
+      const val = input.value.trim();
+      if (!val) return;
+
+      statusPill.innerText = 'Inferring';
+      const res = await fetch('/api/query-text', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question: val })
+      });
+      const data = await res.json();
+      displayOutput(data);
+      input.value = '';
+    }
+
+    function displayOutput(data) {
+      document.getElementById('query-out').innerText = `"${data.query}"`;
+      document.getElementById('answer-out').innerText = data.answer;
+      document.getElementById('latency-out').innerText = `${data.total_latency_ms} ms`;
+      document.getElementById('conf-out').innerText = data.confidence_score;
+
+      const g = document.getElementById('grounded-out');
+      if (data.grounded) {
+        g.innerText = 'Passed / Grounded';
+        g.className = 'font-bold text-sm mt-0.5 text-emerald-400';
+      } else {
+        g.innerText = 'Blocked by Guardrail';
+        g.className = 'font-bold text-sm mt-0.5 text-rose-400';
+      }
+
+      statusPill.innerText = 'Ready';
+      statusPill.className = 'px-3 py-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-xs font-semibold rounded-full';
+      instruction.innerText = 'Click to record your question, click again to submit';
+    }
+  </script>
+</body>
+</html>
